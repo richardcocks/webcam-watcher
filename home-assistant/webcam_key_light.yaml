@@ -1,0 +1,128 @@
+# Home Assistant package for webcam-watcher: turns a light on while any PC's webcam is in use.
+#
+# Install: put this file in <config>/packages/, make sure configuration.yaml has
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# then replace the two placeholders below and restart Home Assistant:
+#   YOUR_WEBHOOK_ID      a long random string; anyone who knows it can post reports
+#   light.desk_key_light the light to control (must support brightness)
+#
+# Each PC runs webcam-watcher pointed at http(s)://<your-ha>/api/webhook/YOUR_WEBHOOK_ID and
+# posts {"machine", "active", "apps", "brightness"} on every change plus a heartbeat each minute.
+# New machines need no changes here.
+
+input_text:
+  # MACHINE=unix-time pairs joined by ';' for machines currently reporting their webcam in use.
+  # Not JSON: HA renders a JSON-looking template result to a dict, which set_value rejects.
+  webcam_reports:
+    name: Webcam reports
+    max: 255
+    icon: mdi:webcam
+
+input_number:
+  # Brightness requested by the machine whose camera most recently came on. Heartbeats don't
+  # change it, so two machines with different settings don't alternate.
+  webcam_key_light_brightness:
+    name: Webcam key light brightness
+    min: 1
+    max: 100
+    step: 1
+    mode: slider
+    unit_of_measurement: "%"
+    icon: mdi:brightness-percent
+
+template:
+  - binary_sensor:
+      # On while any machine reported its camera on in the last 3 minutes. Uses now(), so it
+      # re-renders every minute and a machine that goes silent (laptop closed mid-call) expires.
+      - name: Webcam active
+        unique_id: webcam_active
+        icon: mdi:webcam
+        state: >
+          {{ states('input_text.webcam_reports').split(';') | select('search', '=')
+             | map('regex_replace', '^.*=', '') | map('float', 0)
+             | select('>', now().timestamp() - 180) | list | count > 0 }}
+
+automation:
+  - id: webcam_report
+    alias: Webcam report
+    description: >-
+      Receives webcam-watcher reports and keeps input_text.webcam_reports up to date. Inactive and
+      stale (3 min) machines are dropped. When a machine newly reports its camera on, its requested
+      brightness goes to input_number.webcam_key_light_brightness.
+    mode: queued
+    triggers:
+      - trigger: webhook
+        webhook_id: YOUR_WEBHOOK_ID
+        allowed_methods: [POST]
+        local_only: true
+    variables:
+      machine: "{{ (trigger.json.machine | default('unknown')) | string | replace(';', '_') | replace('=', '_') }}"
+      active: "{{ trigger.json.active | default(false) == true }}"
+      brightness: "{{ [[trigger.json.brightness | default(70) | int(70), 1] | max, 100] | min }}"
+    actions:
+      - if:
+          - condition: template
+            value_template: "{{ active and (';' ~ machine ~ '=') not in (';' ~ states('input_text.webcam_reports')) }}"
+        then:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.webcam_key_light_brightness
+            data:
+              value: "{{ brightness }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.webcam_reports
+        data:
+          value: >
+            {% set ns = namespace(items=[]) %}
+            {% for e in states('input_text.webcam_reports').split(';') if '=' in e %}
+              {% set p = e.split('=') %}
+              {% if p[0] != machine and p[1] | float(0) > now().timestamp() - 180 %}
+                {% set ns.items = ns.items + [e] %}
+              {% endif %}
+            {% endfor %}
+            {% if active %}{% set ns.items = ns.items + [machine ~ '=' ~ (now().timestamp() | int)] %}{% endif %}
+            {{ ns.items | join(';') }}
+
+  - id: webcam_key_light
+    alias: Webcam key light
+    description: >-
+      Turns the key light on at input_number.webcam_key_light_brightness while any PC reports its
+      webcam in use, and follows brightness changes while on. Off after 1s so an app briefly
+      reopening the camera doesn't flicker it.
+    mode: restart
+    triggers:
+      - trigger: state
+        id: webcam
+        entity_id: binary_sensor.webcam_active
+        from: ["on", "off"]
+        to: ["on", "off"]
+      - trigger: state
+        id: brightness
+        entity_id: input_number.webcam_key_light_brightness
+    actions:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.webcam_active
+                state: "on"
+            sequence:
+              - action: light.turn_on
+                target:
+                  entity_id: light.desk_key_light
+                data:
+                  brightness_pct: "{{ states('input_number.webcam_key_light_brightness') | int(70) }}"
+                  transition: 1
+          - conditions:
+              - condition: trigger
+                id: webcam
+            sequence:
+              - delay: "00:00:01"
+              - action: light.turn_off
+                target:
+                  entity_id: light.desk_key_light
+                data:
+                  transition: 2
