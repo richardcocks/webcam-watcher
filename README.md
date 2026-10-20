@@ -2,7 +2,7 @@
 
 Turns a light on in Home Assistant while your webcam is in use, on one PC or several.
 
-A small Windows console app watches for apps using the webcam and reports to a Home Assistant
+A small Windows tray app watches for apps using the webcam and reports to a Home Assistant
 webhook. A Home Assistant package keeps track of every machine that reports and switches a light
 (e.g. a key light for video calls) on while any of them has its camera on.
 
@@ -70,8 +70,24 @@ For example:
 webcam-watcher http://homeassistant.local:8123/api/webhook/YOUR_WEBHOOK_ID work-laptop --brightness 60
 ```
 
-To start it at login, put a shortcut in `shell:startup`. To hide the console window, set
-`<OutputType>WinExe</OutputType>` in the csproj (log output is then discarded).
+It runs without a window, as an icon in the system tray. The lens colour shows the state: grey when
+the camera is off, red when it's on, amber when Home Assistant can't be reached. Hover for the last
+report time; right-click for the current status, **Show log** (also a double-click) and **Exit**.
+Exiting while the camera is on reports it off first, so the light doesn't wait for the 3-minute
+expiry. Only one copy runs per login; starting a second just says it's already running.
+
+The log keeps the last 1000 lines in memory: camera changes, failures and recoveries (successful
+heartbeats aren't logged).
+
+To start it at login, create a shortcut to the exe, with the URL and any options as its arguments,
+in your Startup folder (Win+R, `shell:startup`). From PowerShell:
+
+```powershell
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$([Environment]::GetFolderPath('Startup'))\webcam-watcher.lnk")
+$lnk.TargetPath = "$env:LOCALAPPDATA\webcam-watcher\webcam-watcher.exe"
+$lnk.Arguments = 'http://homeassistant.local:8123/api/webhook/YOUR_WEBHOOK_ID'
+$lnk.Save()
+```
 
 ## Home Assistant setup
 
