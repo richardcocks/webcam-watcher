@@ -28,6 +28,14 @@ and as a heartbeat once a minute:
 {"machine": "MY-PC", "active": true, "apps": ["C:\\Program Files\\...\\ms-teams.exe"], "brightness": 70}
 ```
 
+## Download
+
+Each [release](https://github.com/richardcocks/webcam-watcher/releases/latest) has a self-contained
+`webcam-watcher.exe` for Windows x64 that runs without .NET installed, plus a SHA-256 checksum.
+Releases are built by the [release workflow](.github/workflows/release.yml) when a `v*` tag is pushed.
+
+The exe isn't code-signed, so Windows SmartScreen may warn the first time you run it.
+
 ## Build
 
 Needs the .NET 10 SDK (or change `TargetFramework` in the csproj to an older `-windows` target).
